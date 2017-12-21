@@ -20,6 +20,7 @@ import android.os.Handler;
 import android.os.SystemClock;
 import android.util.Log;
 import android.util.SparseArray;
+
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.ExoPlayerLibraryInfo;
@@ -39,6 +40,7 @@ import com.google.android.exoplayer2.upstream.LoaderErrorThrower;
 import com.google.android.exoplayer2.upstream.ParsingLoadable;
 import com.google.android.exoplayer2.util.Assertions;
 import com.google.android.exoplayer2.util.Util;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -334,9 +336,21 @@ public final class DashMediaSource implements MediaSource {
     int periodCount = manifest == null ? 0 : manifest.getPeriodCount();
     int removedPeriodCount = 0;
     long newFirstPeriodStartTimeMs = newManifest.getPeriod(0).startMs;
-    while (removedPeriodCount < periodCount
-        && manifest.getPeriod(removedPeriodCount).startMs < newFirstPeriodStartTimeMs) {
-      removedPeriodCount++;
+    final String newPeriodId = newManifest.getPeriod(0).id;
+    if (newManifest.dynamic && newPeriodId != null) {
+      while (removedPeriodCount < periodCount) {
+        final String periodId = manifest.getPeriod(removedPeriodCount).id;
+        if ((periodId == null)||(!periodId.equals(newPeriodId))) {
+          removedPeriodCount++;
+        } else {
+          break;
+        }
+      }
+    } else {
+      while (removedPeriodCount < periodCount
+              && manifest.getPeriod(removedPeriodCount).startMs < newFirstPeriodStartTimeMs) {
+        removedPeriodCount++;
+      }
     }
 
     // After discarding old periods, we should never have more periods than listed in the new
