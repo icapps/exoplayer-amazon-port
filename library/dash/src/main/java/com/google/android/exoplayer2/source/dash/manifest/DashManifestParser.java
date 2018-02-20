@@ -357,6 +357,8 @@ public class DashManifestParser extends DefaultHandler
         if (uuid == null) {
           Log.w(TAG, "Skipping malformed cenc:pssh data");
           data = null;
+        } else if (uuid.equals(C.WIDEVINE_UUID)) {
+          data = PsshAtomUtil.downgradePsshVersion(data);
         }
       } else if (data == null && isPlayReady && XmlPullParserUtil.isStartTag(xpp, "mspr:pro")
           && xpp.next() == XmlPullParser.TEXT) {
