@@ -151,7 +151,7 @@ public final class PsshAtomUtil {
     final ByteBuffer buffer = ByteBuffer.wrap(source, 28, 4);
     final int numV1Headers = buffer.getInt();
 
-    final int numBytesToSkip = 32 + 16 * numV1Headers;
+    final int numBytesToSkip = 32 + 16 * numV1Headers + 4;
     final byte[] newData = new byte[source.length - numBytesToSkip];
     System.arraycopy(source, numBytesToSkip, newData, 0, newData.length);
     return PsshAtomUtil.buildPsshAtom(C.WIDEVINE_UUID, newData);
