@@ -32,6 +32,12 @@ public final class PsshAtomUtil {
 
   private static final String TAG = "PsshAtomUtil";
 
+  private static final int PSSH_VERSION_OFFSET = 8;
+  private static final int PSSH_V1_HEADER_OFFSET = 28;
+  private static final int PSSH_V1_HEADER_SIZE = 4;
+  private static final int PSSH_V1_HEADER_ENTRY_SIZE = 16;
+  private static final int PSSH_DATASIZE_SIZE = 4;
+
   private PsshAtomUtil() {}
 
   /**
@@ -141,17 +147,17 @@ public final class PsshAtomUtil {
 
   @Nullable
   public static byte[] downgradePsshVersion(@NonNull byte[] source) {
-    final int version = source[8];
+    final int version = source[PSSH_VERSION_OFFSET];
     if (version == 0) {
       return source;
     } else if (version != 1) {
       return null;
     }
 
-    final ByteBuffer buffer = ByteBuffer.wrap(source, 28, 4);
+    final ByteBuffer buffer = ByteBuffer.wrap(source, PSSH_V1_HEADER_OFFSET, PSSH_V1_HEADER_SIZE);
     final int numV1Headers = buffer.getInt();
 
-    final int numBytesToSkip = 32 + 16 * numV1Headers + 4;
+    final int numBytesToSkip = PSSH_V1_HEADER_OFFSET + PSSH_V1_HEADER_SIZE + (PSSH_V1_HEADER_ENTRY_SIZE * numV1Headers) + PSSH_DATASIZE_SIZE;
     final byte[] newData = new byte[source.length - numBytesToSkip];
     System.arraycopy(source, numBytesToSkip, newData, 0, newData.length);
     return PsshAtomUtil.buildPsshAtom(C.WIDEVINE_UUID, newData);
