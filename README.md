@@ -1,3 +1,5 @@
+[ ![Download](https://api.bintray.com/packages/icapps/maven/exoplayer/images/download.svg) ](https://bintray.com/icapps/maven/exoplayer/_latestVersion)
+
 iCapps port of the Amazon ExoPlayer Port - https://github.com/amzn/exoplayer-amazon-port
 This repository is a port of the ExoPlayer project for Amazon devices, modified to support devices with PSSH V1 widevine issues.
 Includes support for id segment matching for dynamic dash manifests
@@ -11,7 +13,6 @@ https://developer.amazon.com/docs/fire-tv/media-players.html#exoplayer
 Jcenter repo:
 Applications can directly link to the pre-built libraries available in Jcenter repo
 
-Latest version: [ ![Download](https://api.bintray.com/packages/icapps/maven/exoplayer/images/download.svg) ](https://bintray.com/icapps/maven/exoplayer/_latestVersion)
 ```
 //Add the repository url to your gradle file
 repositories {
