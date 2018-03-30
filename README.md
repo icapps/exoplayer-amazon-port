@@ -21,8 +21,7 @@ repositories {
     }
 }
 
-//Add the required dependencies to your gradle file
-Add the dependencies to build.gradle
+// Add the required dependencies to your gradle file
 compile 'com.icapps.android.exoplayer:exoplayer:X.Y.Z'
 compile 'com.icapps.android.exoplayer:exoplayer-core:X.Y.Z'
 compile 'com.icapps.android.exoplayer:exoplayer-hls:X.Y.Z'
