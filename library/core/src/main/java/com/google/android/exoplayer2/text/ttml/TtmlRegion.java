@@ -23,24 +23,26 @@ import com.google.android.exoplayer2.text.Cue;
 /* package */ final class TtmlRegion {
 
   public final String id;
-  public final float position;
-  public final float line;
-  @Cue.LineType public final int lineType;
-  @Cue.AnchorType public final int lineAnchor;
-  public final float width;
+  public final TtmlLength x;
+  public final TtmlLength y;
+  @Cue.AnchorType
+  public final int lineAnchor;
+  public final TtmlLength width;
+  public final TtmlLength height;
 
   public TtmlRegion(String id) {
-    this(id, Cue.DIMEN_UNSET, Cue.DIMEN_UNSET, Cue.TYPE_UNSET, Cue.TYPE_UNSET, Cue.DIMEN_UNSET);
+    this(id, null, null, Cue.TYPE_UNSET, null, null);
   }
 
-  public TtmlRegion(String id, float position, float line, @Cue.LineType int lineType,
-      @Cue.AnchorType int lineAnchor, float width) {
+  public TtmlRegion(String id, TtmlLength x, TtmlLength y,
+                    @Cue.AnchorType int lineAnchor,
+                    TtmlLength width, TtmlLength height) {
     this.id = id;
-    this.position = position;
-    this.line = line;
-    this.lineType = lineType;
+    this.x = x;
+    this.y = y;
     this.lineAnchor = lineAnchor;
     this.width = width;
+    this.height = height;
   }
 
 }

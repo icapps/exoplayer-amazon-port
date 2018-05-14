@@ -256,7 +256,7 @@ public class Cue {
         DIMEN_UNSET, windowColorSet, windowColor);
   }
 
-  private Cue(CharSequence text, Alignment textAlignment, Bitmap bitmap, float line,
+  public Cue(CharSequence text, Alignment textAlignment, Bitmap bitmap, float line,
       @LineType int lineType, @AnchorType int lineAnchor, float position,
       @AnchorType int positionAnchor, float size, float bitmapHeight, boolean windowColorSet,
       int windowColor) {
