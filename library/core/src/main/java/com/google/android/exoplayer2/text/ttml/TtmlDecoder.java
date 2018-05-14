@@ -164,7 +164,7 @@ public final class TtmlDecoder extends SimpleSubtitleDecoder {
     }
   }
 
-  private FrameAndTickRate parseFrameAndTickRates(XmlPullParser xmlParser)
+  private FrameAndTickRate parseFrameAndTickRates(XmlPullParser xmlParser) throws SubtitleDecoderException {
     int frameRate = DEFAULT_FRAME_RATE;
     String frameRateString = xmlParser.getAttributeValue(TTP, "frameRate");
     if (frameRateString != null) {
@@ -197,7 +197,7 @@ public final class TtmlDecoder extends SimpleSubtitleDecoder {
     return new FrameAndTickRate(frameRate * frameRateMultiplier, subFrameRate, tickRate);
   }
 
-  private Map<String, TtmlStyle> parseHeader(XmlPullParser xmlParser,
+  private TtmlMetadata parseHeader(XmlPullParser xmlParser,
       Map<String, TtmlStyle> globalStyles, Map<String, TtmlRegion> globalRegions)
       throws IOException, XmlPullParserException {
     TtmlMetadata metadata = null;

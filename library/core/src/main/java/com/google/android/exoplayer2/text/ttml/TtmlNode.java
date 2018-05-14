@@ -15,6 +15,7 @@
  */
 package com.google.android.exoplayer2.text.ttml;
 
+import android.annotation.SuppressLint;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.text.SpannableStringBuilder;
@@ -181,11 +182,38 @@ import java.util.Map.Entry;
       TtmlRegion region = regionMap.get(entry.getKey());
       final Bitmap backgroundImage = entry.getValue().backgroundImage;
       cues.add(new Cue(cleanUpText(entry.getValue().builder), null, backgroundImage,
-              getLineYValue(region.y.value, region.y.type), getLineType(region.y.type), region.lineAnchor,
-              getLineXValue(region.x.value, region.x.type), Cue.TYPE_UNSET,
-              region.width.value, Cue.DIMEN_UNSET, false, Color.BLACK));
+              getLineYValue(region), getLineType(region), region.lineAnchor,
+              getLineXValue(region.x), Cue.TYPE_UNSET,
+              getLineXValue(region.width), 1.0f, false, Color.BLACK));
     }
     return cues;
+  }
+
+  @SuppressLint("SwitchIntDef")
+  private static float getLineYValue(final TtmlRegion region){
+    final float value;
+    if (region.y.type == TtmlLength.TYPE_PERCENTAGE)
+      value = region.y.value / 100.0f;
+    else
+      value = region.y.value;
+    switch (region.lineAnchor) {
+      case Cue.ANCHOR_TYPE_MIDDLE:
+        return value + region.height.value / 2.0f;
+      case Cue.ANCHOR_TYPE_END:
+        return value + region.height.value;
+    }
+    return value;
+  }
+
+  private static float getLineXValue(final TtmlLength length){
+    if (length.type == TtmlLength.TYPE_PERCENTAGE)
+      return length.value / 100.0f;
+    return length.value;
+  }
+
+
+  private static int getLineType(final TtmlRegion region){
+    return Cue.LINE_TYPE_FRACTION;
   }
 
   private void traverseForText(long timeUs, boolean descendsPNode,
