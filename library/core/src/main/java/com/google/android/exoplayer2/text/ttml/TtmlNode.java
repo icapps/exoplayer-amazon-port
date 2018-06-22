@@ -15,17 +15,16 @@
  */
 package com.google.android.exoplayer2.text.ttml;
 
+import android.annotation.SuppressLint;
+import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.text.SpannableStringBuilder;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.text.Cue;
 import com.google.android.exoplayer2.util.Assertions;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+
+import java.util.*;
 import java.util.Map.Entry;
-import java.util.TreeMap;
-import java.util.TreeSet;
 
 /**
  * A package internal representation of TTML node.
@@ -82,6 +81,7 @@ import java.util.TreeSet;
   public final long endTimeUs;
   public final TtmlStyle style;
   public final String regionId;
+  public final String backgroundImageId;
 
   private final String[] styleIds;
   private final HashMap<String, Integer> nodeStartsByRegion;
@@ -91,16 +91,16 @@ import java.util.TreeSet;
 
   public static TtmlNode buildTextNode(String text) {
     return new TtmlNode(null, TtmlRenderUtil.applyTextElementSpacePolicy(text), C.TIME_UNSET,
-        C.TIME_UNSET, null, null, ANONYMOUS_REGION_ID);
+            C.TIME_UNSET, null, null, ANONYMOUS_REGION_ID, null);
   }
 
   public static TtmlNode buildNode(String tag, long startTimeUs, long endTimeUs,
-      TtmlStyle style, String[] styleIds, String regionId) {
-    return new TtmlNode(tag, null, startTimeUs, endTimeUs, style, styleIds, regionId);
+                                   TtmlStyle style, String[] styleIds, String regionId, String backgroundImageId) {
+    return new TtmlNode(tag, null, startTimeUs, endTimeUs, style, styleIds, regionId, backgroundImageId);
   }
 
   private TtmlNode(String tag, String text, long startTimeUs, long endTimeUs,
-      TtmlStyle style, String[] styleIds, String regionId) {
+                   TtmlStyle style, String[] styleIds, String regionId, String backgroundImageId) {
     this.tag = tag;
     this.text = text;
     this.style = style;
@@ -109,6 +109,7 @@ import java.util.TreeSet;
     this.startTimeUs = startTimeUs;
     this.endTimeUs = endTimeUs;
     this.regionId = Assertions.checkNotNull(regionId);
+    this.backgroundImageId = backgroundImageId;
     nodeStartsByRegion = new HashMap<>();
     nodeEndsByRegion = new HashMap<>();
   }
@@ -172,36 +173,69 @@ import java.util.TreeSet;
   }
 
   public List<Cue> getCues(long timeUs, Map<String, TtmlStyle> globalStyles,
-      Map<String, TtmlRegion> regionMap) {
-    TreeMap<String, SpannableStringBuilder> regionOutputs = new TreeMap<>();
-    traverseForText(timeUs, false, regionId, regionOutputs);
+      Map<String, TtmlRegion> regionMap, TtmlMetadata metadata) {
+    TreeMap<String, SubtitleAccumulator> regionOutputs = new TreeMap<>();
+    traverseForText(timeUs, false, regionId, regionOutputs, metadata);
     traverseForStyle(timeUs, globalStyles, regionOutputs);
     List<Cue> cues = new ArrayList<>();
-    for (Entry<String, SpannableStringBuilder> entry : regionOutputs.entrySet()) {
+    for (Entry<String, SubtitleAccumulator> entry : regionOutputs.entrySet()) {
       TtmlRegion region = regionMap.get(entry.getKey());
+      final Bitmap backgroundImage = entry.getValue().backgroundImage;
       cues.add(
           new Cue(
-              cleanUpText(entry.getValue()),
+              cleanUpText(entry.getValue().builder),
               /* textAlignment= */ null,
-              region.line,
-              region.lineType,
-              region.lineAnchor,
-              region.position,
-              /* positionAnchor= */ Cue.TYPE_UNSET,
-              region.width,
-              region.textSizeType,
-              region.textSize));
+              backgroundImage,
+              getLineYValue(region),                  //line
+              getLineType(region),                    //lineType
+              region.lineAnchor,                      //lineAnchor
+              getLineXValue(region.x),                //Position
+              /* positionAnchor= */ Cue.TYPE_UNSET,   //positionAnchor
+              region.textSizeType,                    //textSizeType
+              region.textSize,                        //textSize
+              getLineXValue(region.width),            //size
+             1.0f,
+              false,
+              Color.BLACK));
     }
     return cues;
   }
 
-  private void traverseForText(
-      long timeUs,
-      boolean descendsPNode,
-      String inheritedRegion,
-      Map<String, SpannableStringBuilder> regionOutputs) {
+  @SuppressLint("SwitchIntDef")
+  private static float getLineYValue(final TtmlRegion region){
+    final float value;
+    if (region.y.type == TtmlLength.TYPE_PERCENTAGE)
+      value = region.y.value / 100.0f;
+    else
+      value = region.y.value;
+    switch (region.lineAnchor) {
+      case Cue.ANCHOR_TYPE_MIDDLE:
+        return value + region.height.value / 2.0f;
+      case Cue.ANCHOR_TYPE_END:
+        return value + region.height.value;
+    }
+    return value;
+  }
+
+  private static float getLineXValue(final TtmlLength length){
+    if (length.type == TtmlLength.TYPE_PERCENTAGE)
+      return length.value / 100.0f;
+    return length.value;
+  }
+
+
+  private static int getLineType(final TtmlRegion region){
+    return Cue.LINE_TYPE_FRACTION;
+  }
+
+  private void traverseForText(long timeUs,
+                               boolean descendsPNode,
+                               String inheritedRegion,
+                               Map<String, SubtitleAccumulator> regionOutputs,
+                               TtmlMetadata metadata) {
     nodeStartsByRegion.clear();
     nodeEndsByRegion.clear();
+
     if (TAG_METADATA.equals(tag)) {
       // Ignore metadata tag.
       return;
@@ -214,30 +248,33 @@ import java.util.TreeSet;
     } else if (TAG_BR.equals(tag) && descendsPNode) {
       getRegionOutput(resolvedRegionId, regionOutputs).append('\n');
     } else if (isActive(timeUs)) {
+      if (backgroundImageId != null)
+        getRegionOutput(resolvedRegionId, regionOutputs).backgroundImage = metadata.getImage(backgroundImageId);
+
       // This is a container node, which can contain zero or more children.
-      for (Entry<String, SpannableStringBuilder> entry : regionOutputs.entrySet()) {
+      for (Entry<String, SubtitleAccumulator> entry : regionOutputs.entrySet()) {
         nodeStartsByRegion.put(entry.getKey(), entry.getValue().length());
       }
 
       boolean isPNode = TAG_P.equals(tag);
       for (int i = 0; i < getChildCount(); i++) {
         getChild(i).traverseForText(timeUs, descendsPNode || isPNode, resolvedRegionId,
-            regionOutputs);
+                regionOutputs, metadata);
       }
       if (isPNode) {
-        TtmlRenderUtil.endParagraph(getRegionOutput(resolvedRegionId, regionOutputs));
+        TtmlRenderUtil.endParagraph(getRegionOutput(resolvedRegionId, regionOutputs).builder);
       }
 
-      for (Entry<String, SpannableStringBuilder> entry : regionOutputs.entrySet()) {
+      for (Entry<String, SubtitleAccumulator> entry : regionOutputs.entrySet()) {
         nodeEndsByRegion.put(entry.getKey(), entry.getValue().length());
       }
     }
   }
 
-  private static SpannableStringBuilder getRegionOutput(
-      String resolvedRegionId, Map<String, SpannableStringBuilder> regionOutputs) {
+  private static SubtitleAccumulator getRegionOutput(String resolvedRegionId,
+      Map<String, SubtitleAccumulator> regionOutputs) {
     if (!regionOutputs.containsKey(resolvedRegionId)) {
-      regionOutputs.put(resolvedRegionId, new SpannableStringBuilder());
+      regionOutputs.put(resolvedRegionId, new SubtitleAccumulator());
     }
     return regionOutputs.get(resolvedRegionId);
   }
@@ -245,7 +282,7 @@ import java.util.TreeSet;
   private void traverseForStyle(
       long timeUs,
       Map<String, TtmlStyle> globalStyles,
-      Map<String, SpannableStringBuilder> regionOutputs) {
+      Map<String, SubtitleAccumulator> regionOutputs) {
     if (!isActive(timeUs)) {
       return;
     }
@@ -254,7 +291,7 @@ import java.util.TreeSet;
       int start = nodeStartsByRegion.containsKey(regionId) ? nodeStartsByRegion.get(regionId) : 0;
       int end = entry.getValue();
       if (start != end) {
-        SpannableStringBuilder regionOutput = regionOutputs.get(regionId);
+        SubtitleAccumulator regionOutput = regionOutputs.get(regionId);
         applyStyleToOutput(globalStyles, regionOutput, start, end);
       }
     }
@@ -265,12 +302,12 @@ import java.util.TreeSet;
 
   private void applyStyleToOutput(
       Map<String, TtmlStyle> globalStyles,
-      SpannableStringBuilder regionOutput,
+      SubtitleAccumulator regionOutput,
       int start,
       int end) {
     TtmlStyle resolvedStyle = TtmlRenderUtil.resolveStyle(style, styleIds, globalStyles);
     if (resolvedStyle != null) {
-      TtmlRenderUtil.applyStylesToSpan(regionOutput, start, end, resolvedStyle);
+      TtmlRenderUtil.applyStylesToSpan(regionOutput.builder, start, end, resolvedStyle);
     }
   }
 
@@ -319,6 +356,23 @@ import java.util.TreeSet;
       /*builderLength--;*/
     }
     return builder;
+  }
+
+  private static class SubtitleAccumulator {
+    SpannableStringBuilder builder = new SpannableStringBuilder();
+    Bitmap backgroundImage = null;
+
+    public void append(CharSequence text) {
+      builder.append(text);
+    }
+
+    public void append(char c) {
+      builder.append(c);
+    }
+
+    public int length() {
+      return builder.length();
+    }
   }
 
 }

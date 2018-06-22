@@ -16,7 +16,11 @@
 package com.google.android.exoplayer2.extractor.mp4;
 
 import android.support.annotation.Nullable;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.util.Log;
+
+import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.util.ParsableByteArray;
 import java.nio.ByteBuffer;
 import java.util.UUID;
@@ -27,6 +31,12 @@ import java.util.UUID;
 public final class PsshAtomUtil {
 
   private static final String TAG = "PsshAtomUtil";
+
+  private static final int PSSH_VERSION_OFFSET = 8;
+  private static final int PSSH_V1_HEADER_OFFSET = 28;
+  private static final int PSSH_V1_HEADER_SIZE = 4;
+  private static final int PSSH_V1_HEADER_ENTRY_SIZE = 16;
+  private static final int PSSH_DATASIZE_SIZE = 4;
 
   private PsshAtomUtil() {}
 
@@ -177,6 +187,24 @@ public final class PsshAtomUtil {
     byte[] data = new byte[dataSize];
     atomData.readBytes(data, 0, dataSize);
     return new PsshAtom(uuid, atomVersion, data);
+  }
+
+  @Nullable
+  public static byte[] downgradePsshVersion(@NonNull byte[] source) {
+    final int version = source[PSSH_VERSION_OFFSET];
+    if (version == 0) {
+      return source;
+    } else if (version != 1) {
+      return null;
+    }
+
+    final ByteBuffer buffer = ByteBuffer.wrap(source, PSSH_V1_HEADER_OFFSET, PSSH_V1_HEADER_SIZE);
+    final int numV1Headers = buffer.getInt();
+
+    final int numBytesToSkip = PSSH_V1_HEADER_OFFSET + PSSH_V1_HEADER_SIZE + (PSSH_V1_HEADER_ENTRY_SIZE * numV1Headers) + PSSH_DATASIZE_SIZE;
+    final byte[] newData = new byte[source.length - numBytesToSkip];
+    System.arraycopy(source, numBytesToSkip, newData, 0, newData.length);
+    return PsshAtomUtil.buildPsshAtom(C.WIDEVINE_UUID, newData);
   }
 
   // TODO: Consider exposing this and making parsePsshAtom public.
