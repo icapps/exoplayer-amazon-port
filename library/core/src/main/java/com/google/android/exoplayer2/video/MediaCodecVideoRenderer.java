@@ -212,7 +212,7 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
     if (AmazonQuirks.isSnappingToVsyncDisabled()) {
       frameReleaseTimeHelper = new VideoFrameReleaseTimeHelper();
     } else {
-      frameReleaseTimeHelper = new VideoFrameReleaseTimeHelper(this.context);
+      frameReleaseTimeHelper = new VideoFrameReleaseTimeHelper(context);
     }
     // AMZN_CHANGE_END
     eventDispatcher = new EventDispatcher(eventHandler, eventListener);

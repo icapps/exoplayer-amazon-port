@@ -62,6 +62,8 @@ public final class AmazonQuirks {
         isKindleTablet = isAmazonDevice && DEVICEMODEL.startsWith(KINDLE_TABLET_DEVICE_MODEL);
         isFirePhone = isAmazonDevice && DEVICEMODEL.startsWith(FIRE_PHONE_DEVICE_MODEL);
         isSOHOKindleTablet = isAmazonDevice && DEVICEMODEL.equalsIgnoreCase(SOHO_DEVICE_MODEL);
+        isSnappingToVsyncDisabled = false;
+        skipProfileLevelCheck = false;
         loadForcedLogSettings();
     }
 
