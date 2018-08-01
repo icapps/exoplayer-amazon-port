@@ -203,6 +203,8 @@ import java.util.Map.Entry;
 
   @SuppressLint("SwitchIntDef")
   private static float getLineYValue(final TtmlRegion region){
+    if (region.y == null)
+      return Cue.DIMEN_UNSET;
     final float value;
     if (region.y.type == TtmlLength.TYPE_PERCENTAGE)
       value = region.y.value / 100.0f;
@@ -218,6 +220,8 @@ import java.util.Map.Entry;
   }
 
   private static float getLineXValue(final TtmlLength length){
+    if (length == null)
+      return Cue.DIMEN_UNSET;
     if (length.type == TtmlLength.TYPE_PERCENTAGE)
       return length.value / 100.0f;
     return length.value;
@@ -225,6 +229,8 @@ import java.util.Map.Entry;
 
 
   private static int getLineType(final TtmlRegion region){
+    if (region.y == null)
+      return Cue.TYPE_UNSET;
     return Cue.LINE_TYPE_FRACTION;
   }
 
