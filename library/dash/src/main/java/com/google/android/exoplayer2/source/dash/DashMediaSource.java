@@ -20,9 +20,7 @@ import android.os.Handler;
 import android.os.SystemClock;
 import android.support.annotation.Nullable;
 import android.text.TextUtils;
-import android.util.Log;
 import android.util.SparseArray;
-
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.ExoPlayerLibraryInfo;
@@ -44,12 +42,16 @@ import com.google.android.exoplayer2.source.dash.manifest.DashManifestParser;
 import com.google.android.exoplayer2.source.dash.manifest.UtcTimingElement;
 import com.google.android.exoplayer2.upstream.Allocator;
 import com.google.android.exoplayer2.upstream.DataSource;
+import com.google.android.exoplayer2.upstream.DefaultLoadErrorHandlingPolicy;
+import com.google.android.exoplayer2.upstream.LoadErrorHandlingPolicy;
 import com.google.android.exoplayer2.upstream.Loader;
+import com.google.android.exoplayer2.upstream.Loader.LoadErrorAction;
 import com.google.android.exoplayer2.upstream.LoaderErrorThrower;
 import com.google.android.exoplayer2.upstream.ParsingLoadable;
+import com.google.android.exoplayer2.upstream.TransferListener;
 import com.google.android.exoplayer2.util.Assertions;
+import com.google.android.exoplayer2.util.Log;
 import com.google.android.exoplayer2.util.Util;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -77,12 +79,21 @@ public final class DashMediaSource extends BaseMediaSource {
 
     private @Nullable ParsingLoadable.Parser<? extends DashManifest> manifestParser;
     private CompositeSequenceableLoaderFactory compositeSequenceableLoaderFactory;
-    private int minLoadableRetryCount;
+    private LoadErrorHandlingPolicy loadErrorHandlingPolicy;
     private long livePresentationDelayMs;
-    private final @Nullable Long minUpdateOverride;
-    private long defaultLivePresentationDelayMs;
+    private boolean livePresentationDelayOverridesManifest;
     private boolean isCreateCalled;
     private @Nullable Object tag;
+
+    /**
+     * Creates a new factory for {@link DashMediaSource}s.
+     *
+     * @param dataSourceFactory A factory for {@link DataSource} instances that will be used to load
+     *     manifest and media data.
+     */
+    public Factory(DataSource.Factory dataSourceFactory) {
+      this(new DefaultDashChunkSource.Factory(dataSourceFactory), dataSourceFactory);
+    }
 
     /**
      * Creates a new factory for {@link DashMediaSource}s.
@@ -96,30 +107,10 @@ public final class DashMediaSource extends BaseMediaSource {
     public Factory(
         DashChunkSource.Factory chunkSourceFactory,
         @Nullable DataSource.Factory manifestDataSourceFactory) {
-      this(chunkSourceFactory, manifestDataSourceFactory, null);
-    }
-
-    /**
-     * Creates a new factory for {@link DashMediaSource}s.
-     *
-     * @param chunkSourceFactory A factory for {@link DashChunkSource} instances.
-     * @param manifestDataSourceFactory A factory for {@link DataSource} instances that will be used
-     *     to load (and refresh) the manifest. May be {@code null} if the factory will only ever be
-     *     used to create create media sources with sideloaded manifests via {@link
-     *     #createMediaSource(DashManifest, Handler, MediaSourceEventListener)}.
-     * @param minUpdateOverride Optional override for the minUpdatePeriodMs from the dash manifest. If this is set,
-     *     the value from the manifest will not be used (when the manifest is dynamic)
-     */
-    public Factory(
-            DashChunkSource.Factory chunkSourceFactory,
-            @Nullable DataSource.Factory manifestDataSourceFactory,
-            @Nullable Long minUpdateOverride) {
       this.chunkSourceFactory = Assertions.checkNotNull(chunkSourceFactory);
       this.manifestDataSourceFactory = manifestDataSourceFactory;
-      this.minUpdateOverride = minUpdateOverride;
-      minLoadableRetryCount = DEFAULT_MIN_LOADABLE_RETRY_COUNT;
-      livePresentationDelayMs = DEFAULT_LIVE_PRESENTATION_DELAY_PREFER_MANIFEST_MS;
-      defaultLivePresentationDelayMs = DEFAULT_LIVE_PRESENTATION_DELAY_FIXED_MS;
+      loadErrorHandlingPolicy = new DefaultLoadErrorHandlingPolicy();
+      livePresentationDelayMs = DEFAULT_LIVE_PRESENTATION_DELAY_MS;
       compositeSequenceableLoaderFactory = new DefaultCompositeSequenceableLoaderFactory();
     }
 
@@ -139,54 +130,69 @@ public final class DashMediaSource extends BaseMediaSource {
     }
 
     /**
-     * Sets the minimum number of times to retry if a loading error occurs. The default value is
-     * {@link #DEFAULT_MIN_LOADABLE_RETRY_COUNT}.
+     * Sets the minimum number of times to retry if a loading error occurs. See {@link
+     * #setLoadErrorHandlingPolicy} for the default value.
+     *
+     * <p>Calling this method is equivalent to calling {@link #setLoadErrorHandlingPolicy} with
+     * {@link DefaultLoadErrorHandlingPolicy#DefaultLoadErrorHandlingPolicy(int)
+     * DefaultLoadErrorHandlingPolicy(minLoadableRetryCount)}
      *
      * @param minLoadableRetryCount The minimum number of times to retry if a loading error occurs.
      * @return This factory, for convenience.
      * @throws IllegalStateException If one of the {@code create} methods has already been called.
+     * @deprecated Use {@link #setLoadErrorHandlingPolicy(LoadErrorHandlingPolicy)} instead.
      */
+    @Deprecated
     public Factory setMinLoadableRetryCount(int minLoadableRetryCount) {
+      return setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(minLoadableRetryCount));
+    }
+
+    /**
+     * Sets the {@link LoadErrorHandlingPolicy}. The default value is created by calling {@link
+     * DefaultLoadErrorHandlingPolicy#DefaultLoadErrorHandlingPolicy()}.
+     *
+     * <p>Calling this method overrides any calls to {@link #setMinLoadableRetryCount(int)}.
+     *
+     * @param loadErrorHandlingPolicy A {@link LoadErrorHandlingPolicy}.
+     * @return This factory, for convenience.
+     * @throws IllegalStateException If one of the {@code create} methods has already been called.
+     */
+    public Factory setLoadErrorHandlingPolicy(LoadErrorHandlingPolicy loadErrorHandlingPolicy) {
       Assertions.checkState(!isCreateCalled);
-      this.minLoadableRetryCount = minLoadableRetryCount;
+      this.loadErrorHandlingPolicy = loadErrorHandlingPolicy;
       return this;
+    }
+
+    /** @deprecated Use {@link #setLivePresentationDelayMs(long, boolean)}. */
+    @Deprecated
+    @SuppressWarnings("deprecation")
+    public Factory setLivePresentationDelayMs(long livePresentationDelayMs) {
+      if (livePresentationDelayMs == DEFAULT_LIVE_PRESENTATION_DELAY_PREFER_MANIFEST_MS) {
+        return setLivePresentationDelayMs(DEFAULT_LIVE_PRESENTATION_DELAY_MS, false);
+      } else {
+        return setLivePresentationDelayMs(livePresentationDelayMs, true);
+      }
     }
 
     /**
      * Sets the duration in milliseconds by which the default start position should precede the end
-     * of the live window for live playbacks. The default value is {@link
-     * #DEFAULT_LIVE_PRESENTATION_DELAY_PREFER_MANIFEST_MS}.
+     * of the live window for live playbacks. The {@code overridesManifest} parameter specifies
+     * whether the value is used in preference to one in the manifest, if present. The default value
+     * is {@link #DEFAULT_LIVE_PRESENTATION_DELAY_MS}, and by default {@code overridesManifest} is
+     * false.
      *
      * @param livePresentationDelayMs For live playbacks, the duration in milliseconds by which the
-     *     default start position should precede the end of the live window. Use {@link
-     *     #DEFAULT_LIVE_PRESENTATION_DELAY_PREFER_MANIFEST_MS} to use the value specified by the
-     *     manifest, if present.
+     *     default start position should precede the end of the live window.
+     * @param overridesManifest Whether the value is used in preference to one in the manifest, if
+     *     present.
      * @return This factory, for convenience.
      * @throws IllegalStateException If one of the {@code create} methods has already been called.
      */
-    public Factory setLivePresentationDelayMs(long livePresentationDelayMs) {
+    public Factory setLivePresentationDelayMs(
+        long livePresentationDelayMs, boolean overridesManifest) {
       Assertions.checkState(!isCreateCalled);
       this.livePresentationDelayMs = livePresentationDelayMs;
-      return this;
-    }
-     
-    /**
-     * Sets the duration in milliseconds by which the default start position should precede the end
-     * of the live window for live playbacks if the value is not present in the manifest. 
-     * The default value is {@link #DEFAULT_LIVE_PRESENTATION_DELAY_FIXED_MS}. This value is only 
-     * used when {@link setLivePresentationDelayMs} has not overwritten the presentation delay to a
-     * value other than #DEFAULT_LIVE_PRESENTATION_DELAY_PREFER_MANIFEST_MS
-     *
-     * @param defaultLivePresentationDelayMs For live playbacks, the duration in milliseconds by 
-     *     which the default start position should precede the end of the live window if the
-     *     duration is not specifed in the manifest or overwritten using
-     *     {@link setLivePresentationDelayMs}.
-     * @return This factory, for convenience.
-     * @throws IllegalStateException If one of the {@code create} methods has already been called.
-     */
-    public Factory setDefaultLivePresentationDelayMs(long defaultLivePresentationDelayMs) {
-      Assertions.checkState(!isCreateCalled);
-      this.defaultLivePresentationDelayMs = defaultLivePresentationDelayMs;
+      this.livePresentationDelayOverridesManifest = overridesManifest;
       return this;
     }
 
@@ -241,11 +247,10 @@ public final class DashMediaSource extends BaseMediaSource {
           /* manifestParser= */ null,
           chunkSourceFactory,
           compositeSequenceableLoaderFactory,
-          minLoadableRetryCount,
+          loadErrorHandlingPolicy,
           livePresentationDelayMs,
-          defaultLivePresentationDelayMs,
-          tag,
-          minUpdateOverride);
+          livePresentationDelayOverridesManifest,
+          tag);
     }
 
     /**
@@ -283,11 +288,10 @@ public final class DashMediaSource extends BaseMediaSource {
           manifestParser,
           chunkSourceFactory,
           compositeSequenceableLoaderFactory,
-          minLoadableRetryCount,
+          loadErrorHandlingPolicy,
           livePresentationDelayMs,
-          defaultLivePresentationDelayMs,
-          tag,
-          minUpdateOverride);
+          livePresentationDelayOverridesManifest,
+          tag);
     }
 
     /**
@@ -313,21 +317,16 @@ public final class DashMediaSource extends BaseMediaSource {
   }
 
   /**
-   * The default minimum number of times to retry loading data prior to failing.
+   * The default presentation delay for live streams. The presentation delay is the duration by
+   * which the default start position precedes the end of the live window.
    */
-  public static final int DEFAULT_MIN_LOADABLE_RETRY_COUNT = 3;
-  /**
-   * A constant indicating that the presentation delay for live streams should be set to
-   * {@link DashManifest#suggestedPresentationDelayMs} if specified by the manifest, or
-   * {@link #DEFAULT_LIVE_PRESENTATION_DELAY_FIXED_MS} otherwise. The presentation delay is the
-   * duration by which the default start position precedes the end of the live window.
-   */
-  public static final long DEFAULT_LIVE_PRESENTATION_DELAY_PREFER_MANIFEST_MS = -1;
-  /**
-   * A fixed default presentation delay for live streams. The presentation delay is the duration
-   * by which the default start position precedes the end of the live window.
-   */
-  public static final long DEFAULT_LIVE_PRESENTATION_DELAY_FIXED_MS = 30000;
+  public static final long DEFAULT_LIVE_PRESENTATION_DELAY_MS = 30000;
+  /** @deprecated Use {@link #DEFAULT_LIVE_PRESENTATION_DELAY_MS}. */
+  @Deprecated
+  public static final long DEFAULT_LIVE_PRESENTATION_DELAY_FIXED_MS =
+      DEFAULT_LIVE_PRESENTATION_DELAY_MS;
+  /** @deprecated Use of this parameter is no longer necessary. */
+  @Deprecated public static final long DEFAULT_LIVE_PRESENTATION_DELAY_PREFER_MANIFEST_MS = -1;
 
   /**
    * The interval in milliseconds between invocations of {@link
@@ -346,9 +345,9 @@ public final class DashMediaSource extends BaseMediaSource {
   private final DataSource.Factory manifestDataSourceFactory;
   private final DashChunkSource.Factory chunkSourceFactory;
   private final CompositeSequenceableLoaderFactory compositeSequenceableLoaderFactory;
-  private final int minLoadableRetryCount;
+  private final LoadErrorHandlingPolicy loadErrorHandlingPolicy;
   private final long livePresentationDelayMs;
-  private final long defaultLivePresentationDelayMs;
+  private final boolean livePresentationDelayOverridesManifest;
   private final EventDispatcher manifestEventDispatcher;
   private final ParsingLoadable.Parser<? extends DashManifest> manifestParser;
   private final ManifestCallback manifestCallback;
@@ -359,10 +358,10 @@ public final class DashMediaSource extends BaseMediaSource {
   private final PlayerEmsgCallback playerEmsgCallback;
   private final LoaderErrorThrower manifestLoadErrorThrower;
   private final @Nullable Object tag;
-  private final @Nullable Long minUpdateOverride;
 
   private DataSource dataSource;
   private Loader loader;
+  private @Nullable TransferListener mediaTransferListener;
 
   private IOException manifestFatalError;
   private Handler handler;
@@ -391,12 +390,17 @@ public final class DashMediaSource extends BaseMediaSource {
    * @deprecated Use {@link Factory} instead.
    */
   @Deprecated
+  @SuppressWarnings("deprecation")
   public DashMediaSource(
       DashManifest manifest,
       DashChunkSource.Factory chunkSourceFactory,
       Handler eventHandler,
       MediaSourceEventListener eventListener) {
-    this(manifest, chunkSourceFactory, DEFAULT_MIN_LOADABLE_RETRY_COUNT, eventHandler,
+    this(
+        manifest,
+        chunkSourceFactory,
+        DefaultLoadErrorHandlingPolicy.DEFAULT_MIN_LOADABLE_RETRY_COUNT,
+        eventHandler,
         eventListener);
   }
 
@@ -424,11 +428,10 @@ public final class DashMediaSource extends BaseMediaSource {
         /* manifestParser= */ null,
         chunkSourceFactory,
         new DefaultCompositeSequenceableLoaderFactory(),
-        minLoadableRetryCount,
-        DEFAULT_LIVE_PRESENTATION_DELAY_PREFER_MANIFEST_MS,
-        DEFAULT_LIVE_PRESENTATION_DELAY_FIXED_MS,
-        /* tag= */ null,
-        /* minUpdateOverride= */null);
+        new DefaultLoadErrorHandlingPolicy(minLoadableRetryCount),
+        DEFAULT_LIVE_PRESENTATION_DELAY_MS,
+        /* livePresentationDelayOverridesManifest= */ false,
+        /* tag= */ null);
     if (eventHandler != null && eventListener != null) {
       addEventListener(eventHandler, eventListener);
     }
@@ -447,15 +450,21 @@ public final class DashMediaSource extends BaseMediaSource {
    * @deprecated Use {@link Factory} instead.
    */
   @Deprecated
+  @SuppressWarnings("deprecation")
   public DashMediaSource(
       Uri manifestUri,
       DataSource.Factory manifestDataSourceFactory,
       DashChunkSource.Factory chunkSourceFactory,
       Handler eventHandler,
       MediaSourceEventListener eventListener) {
-    this(manifestUri, manifestDataSourceFactory, chunkSourceFactory,
-        DEFAULT_MIN_LOADABLE_RETRY_COUNT, DEFAULT_LIVE_PRESENTATION_DELAY_PREFER_MANIFEST_MS,
-        eventHandler, eventListener);
+    this(
+        manifestUri,
+        manifestDataSourceFactory,
+        chunkSourceFactory,
+        DefaultLoadErrorHandlingPolicy.DEFAULT_MIN_LOADABLE_RETRY_COUNT,
+        DEFAULT_LIVE_PRESENTATION_DELAY_PREFER_MANIFEST_MS,
+        eventHandler,
+        eventListener);
   }
 
   /**
@@ -476,6 +485,7 @@ public final class DashMediaSource extends BaseMediaSource {
    * @deprecated Use {@link Factory} instead.
    */
   @Deprecated
+  @SuppressWarnings("deprecation")
   public DashMediaSource(
       Uri manifestUri,
       DataSource.Factory manifestDataSourceFactory,
@@ -484,8 +494,15 @@ public final class DashMediaSource extends BaseMediaSource {
       long livePresentationDelayMs,
       Handler eventHandler,
       MediaSourceEventListener eventListener) {
-    this(manifestUri, manifestDataSourceFactory, new DashManifestParser(), chunkSourceFactory,
-        minLoadableRetryCount, livePresentationDelayMs, eventHandler, eventListener);
+    this(
+        manifestUri,
+        manifestDataSourceFactory,
+        new DashManifestParser(),
+        chunkSourceFactory,
+        minLoadableRetryCount,
+        livePresentationDelayMs,
+        eventHandler,
+        eventListener);
   }
 
   /**
@@ -507,6 +524,7 @@ public final class DashMediaSource extends BaseMediaSource {
    * @deprecated Use {@link Factory} instead.
    */
   @Deprecated
+  @SuppressWarnings("deprecation")
   public DashMediaSource(
       Uri manifestUri,
       DataSource.Factory manifestDataSourceFactory,
@@ -523,11 +541,12 @@ public final class DashMediaSource extends BaseMediaSource {
         manifestParser,
         chunkSourceFactory,
         new DefaultCompositeSequenceableLoaderFactory(),
-        minLoadableRetryCount,
-        livePresentationDelayMs,
-        DEFAULT_LIVE_PRESENTATION_DELAY_FIXED_MS,
-        /* tag= */ null,
-        /* minUpdateOverride= */null);
+        new DefaultLoadErrorHandlingPolicy(minLoadableRetryCount),
+        livePresentationDelayMs == DEFAULT_LIVE_PRESENTATION_DELAY_PREFER_MANIFEST_MS
+            ? DEFAULT_LIVE_PRESENTATION_DELAY_MS
+            : livePresentationDelayMs,
+        livePresentationDelayMs != DEFAULT_LIVE_PRESENTATION_DELAY_PREFER_MANIFEST_MS,
+        /* tag= */ null);
     if (eventHandler != null && eventListener != null) {
       addEventListener(eventHandler, eventListener);
     }
@@ -540,23 +559,21 @@ public final class DashMediaSource extends BaseMediaSource {
       ParsingLoadable.Parser<? extends DashManifest> manifestParser,
       DashChunkSource.Factory chunkSourceFactory,
       CompositeSequenceableLoaderFactory compositeSequenceableLoaderFactory,
-      int minLoadableRetryCount,
+      LoadErrorHandlingPolicy loadErrorHandlingPolicy,
       long livePresentationDelayMs,
-      long defaultLivePresentationDelayMs,
-      @Nullable Object tag,
-      @Nullable Long minUpdateOverride) {
+      boolean livePresentationDelayOverridesManifest,
+      @Nullable Object tag) {
     this.initialManifestUri = manifestUri;
     this.manifest = manifest;
     this.manifestUri = manifestUri;
     this.manifestDataSourceFactory = manifestDataSourceFactory;
     this.manifestParser = manifestParser;
     this.chunkSourceFactory = chunkSourceFactory;
-    this.minLoadableRetryCount = minLoadableRetryCount;
+    this.loadErrorHandlingPolicy = loadErrorHandlingPolicy;
     this.livePresentationDelayMs = livePresentationDelayMs;
-    this.defaultLivePresentationDelayMs = defaultLivePresentationDelayMs;
+    this.livePresentationDelayOverridesManifest = livePresentationDelayOverridesManifest;
     this.compositeSequenceableLoaderFactory = compositeSequenceableLoaderFactory;
     this.tag = tag;
-    this.minUpdateOverride = minUpdateOverride;
     sideloadedManifest = manifest != null;
     manifestEventDispatcher = createEventDispatcher(/* mediaPeriodId= */ null);
     manifestUriLock = new Object();
@@ -572,18 +589,8 @@ public final class DashMediaSource extends BaseMediaSource {
     } else {
       manifestCallback = new ManifestCallback();
       manifestLoadErrorThrower = new ManifestLoadErrorThrower();
-      refreshManifestRunnable = new Runnable() {
-        @Override
-        public void run() {
-          startLoadingManifest();
-        }
-      };
-      simulateManifestRefreshRunnable = new Runnable() {
-        @Override
-        public void run() {
-          processManifest(false);
-        }
-      };
+      refreshManifestRunnable = this::startLoadingManifest;
+      simulateManifestRefreshRunnable = () -> processManifest(false);
     }
   }
 
@@ -602,7 +609,11 @@ public final class DashMediaSource extends BaseMediaSource {
   // MediaSource implementation.
 
   @Override
-  public void prepareSourceInternal(ExoPlayer player, boolean isTopLevelSource) {
+  public void prepareSourceInternal(
+      ExoPlayer player,
+      boolean isTopLevelSource,
+      @Nullable TransferListener mediaTransferListener) {
+    this.mediaTransferListener = mediaTransferListener;
     if (sideloadedManifest) {
       processManifest(false);
     } else {
@@ -620,7 +631,7 @@ public final class DashMediaSource extends BaseMediaSource {
 
   @Override
   public MediaPeriod createPeriod(MediaPeriodId periodId, Allocator allocator) {
-    int periodIndex = periodId.periodIndex;
+    int periodIndex = (Integer) periodId.periodUid - firstPeriodId;
     EventDispatcher periodEventDispatcher =
         createEventDispatcher(periodId, manifest.getPeriod(periodIndex).startMs);
     DashMediaPeriod mediaPeriod =
@@ -629,7 +640,8 @@ public final class DashMediaSource extends BaseMediaSource {
             manifest,
             periodIndex,
             chunkSourceFactory,
-            minLoadableRetryCount,
+            mediaTransferListener,
+            loadErrorHandlingPolicy,
             periodEventDispatcher,
             elapsedRealtimeOffsetMs,
             manifestLoadErrorThrower,
@@ -696,6 +708,8 @@ public final class DashMediaSource extends BaseMediaSource {
       long elapsedRealtimeMs, long loadDurationMs) {
     manifestEventDispatcher.loadCompleted(
         loadable.dataSpec,
+        loadable.getUri(),
+        loadable.getResponseHeaders(),
         loadable.type,
         elapsedRealtimeMs,
         loadDurationMs,
@@ -750,7 +764,8 @@ public final class DashMediaSource extends BaseMediaSource {
       }
 
       if (isManifestStale) {
-        if (staleManifestReloadAttempt++ < minLoadableRetryCount) {
+        if (staleManifestReloadAttempt++
+            < loadErrorHandlingPolicy.getMinimumLoadableRetryCount(loadable.type)) {
           scheduleManifestRefresh(getManifestLoadRetryDelayMillis());
         } else {
           manifestFatalError = new DashManifestStaleException();
@@ -769,7 +784,9 @@ public final class DashMediaSource extends BaseMediaSource {
       synchronized (manifestUriLock) {
         // This condition checks that replaceManifestUri wasn't called between the start and end of
         // this load. If it was, we ignore the manifest location and prefer the manual replacement.
-        if (loadable.dataSpec.uri == manifestUri) {
+        @SuppressWarnings("ReferenceEquality")
+        boolean isSameUriInstance = loadable.dataSpec.uri == manifestUri;
+        if (isSameUriInstance) {
           manifestUri = manifest.location;
         }
       }
@@ -787,8 +804,7 @@ public final class DashMediaSource extends BaseMediaSource {
     }
   }
 
-  /* package */ @Loader.RetryAction
-  int onManifestLoadError(
+  /* package */ LoadErrorAction onManifestLoadError(
       ParsingLoadable<DashManifest> loadable,
       long elapsedRealtimeMs,
       long loadDurationMs,
@@ -796,6 +812,8 @@ public final class DashMediaSource extends BaseMediaSource {
     boolean isFatal = error instanceof ParserException;
     manifestEventDispatcher.loadError(
         loadable.dataSpec,
+        loadable.getUri(),
+        loadable.getResponseHeaders(),
         loadable.type,
         elapsedRealtimeMs,
         loadDurationMs,
@@ -809,6 +827,8 @@ public final class DashMediaSource extends BaseMediaSource {
       long elapsedRealtimeMs, long loadDurationMs) {
     manifestEventDispatcher.loadCompleted(
         loadable.dataSpec,
+        loadable.getUri(),
+        loadable.getResponseHeaders(),
         loadable.type,
         elapsedRealtimeMs,
         loadDurationMs,
@@ -816,14 +836,15 @@ public final class DashMediaSource extends BaseMediaSource {
     onUtcTimestampResolved(loadable.getResult() - elapsedRealtimeMs);
   }
 
-  /* package */ @Loader.RetryAction
-  int onUtcTimestampLoadError(
+  /* package */ LoadErrorAction onUtcTimestampLoadError(
       ParsingLoadable<Long> loadable,
       long elapsedRealtimeMs,
       long loadDurationMs,
       IOException error) {
     manifestEventDispatcher.loadError(
         loadable.dataSpec,
+        loadable.getUri(),
+        loadable.getResponseHeaders(),
         loadable.type,
         elapsedRealtimeMs,
         loadDurationMs,
@@ -838,6 +859,8 @@ public final class DashMediaSource extends BaseMediaSource {
       long loadDurationMs) {
     manifestEventDispatcher.loadCanceled(
         loadable.dataSpec,
+        loadable.getUri(),
+        loadable.getResponseHeaders(),
         loadable.type,
         elapsedRealtimeMs,
         loadDurationMs,
@@ -940,9 +963,9 @@ public final class DashMediaSource extends BaseMediaSource {
     long windowDefaultStartPositionUs = 0;
     if (manifest.dynamic) {
       long presentationDelayForManifestMs = livePresentationDelayMs;
-      if (presentationDelayForManifestMs == DEFAULT_LIVE_PRESENTATION_DELAY_PREFER_MANIFEST_MS) {
-        presentationDelayForManifestMs = manifest.suggestedPresentationDelayMs != C.TIME_UNSET
-            ? manifest.suggestedPresentationDelayMs : defaultLivePresentationDelayMs;
+      if (!livePresentationDelayOverridesManifest
+          && manifest.suggestedPresentationDelayMs != C.TIME_UNSET) {
+        presentationDelayForManifestMs = manifest.suggestedPresentationDelayMs;
       }
       // Snap the default position to the start of the segment containing it.
       windowDefaultStartPositionUs = windowDurationUs - C.msToUs(presentationDelayForManifestMs);
@@ -979,9 +1002,9 @@ public final class DashMediaSource extends BaseMediaSource {
         startLoadingManifest();
       } else if (scheduleRefresh
           && manifest.dynamic
-          && (manifest.minUpdatePeriodMs != C.TIME_UNSET || minUpdateOverride != null)) {
+          && manifest.minUpdatePeriodMs != C.TIME_UNSET) {
         // Schedule an explicit refresh if needed.
-        long minUpdatePeriodMs = (minUpdateOverride == null) ? manifest.minUpdatePeriodMs : minUpdateOverride;
+        long minUpdatePeriodMs = manifest.minUpdatePeriodMs;
         if (minUpdatePeriodMs == 0) {
           // TODO: This is a temporary hack to avoid constantly refreshing the MPD in cases where
           // minimumUpdatePeriod is set to 0. In such cases we shouldn't refresh unless there is
@@ -1015,7 +1038,7 @@ public final class DashMediaSource extends BaseMediaSource {
     startLoading(
         new ParsingLoadable<>(dataSource, manifestUri, C.DATA_TYPE_MANIFEST, manifestParser),
         manifestCallback,
-        minLoadableRetryCount);
+        loadErrorHandlingPolicy.getMinimumLoadableRetryCount(C.DATA_TYPE_MANIFEST));
   }
 
   private long getManifestLoadRetryDelayMillis() {
@@ -1139,10 +1162,9 @@ public final class DashMediaSource extends BaseMediaSource {
 
     @Override
     public Period getPeriod(int periodIndex, Period period, boolean setIdentifiers) {
-      Assertions.checkIndex(periodIndex, 0, manifest.getPeriodCount());
+      Assertions.checkIndex(periodIndex, 0, getPeriodCount());
       Object id = setIdentifiers ? manifest.getPeriod(periodIndex).id : null;
-      Object uid = setIdentifiers ? firstPeriodId
-          + Assertions.checkIndex(periodIndex, 0, manifest.getPeriodCount()) : null;
+      Object uid = setIdentifiers ? (firstPeriodId + periodIndex) : null;
       return period.set(id, uid, 0, manifest.getPeriodDurationUs(periodIndex),
           C.msToUs(manifest.getPeriod(periodIndex).startMs - manifest.getPeriod(0).startMs)
               - offsetInFirstPeriodUs);
@@ -1169,7 +1191,7 @@ public final class DashMediaSource extends BaseMediaSource {
           windowDefaultStartPositionUs,
           windowDurationUs,
           /* firstPeriodIndex= */ 0,
-          manifest.getPeriodCount() - 1,
+          /* lastPeriodIndex= */ getPeriodCount() - 1,
           offsetInFirstPeriodUs);
     }
 
@@ -1179,8 +1201,8 @@ public final class DashMediaSource extends BaseMediaSource {
         return C.INDEX_UNSET;
       }
       int periodId = (int) uid;
-      return periodId < firstPeriodId || periodId >= firstPeriodId + getPeriodCount()
-          ? C.INDEX_UNSET : (periodId - firstPeriodId);
+      int periodIndex = periodId - firstPeriodId;
+      return periodIndex < 0 || periodIndex >= getPeriodCount() ? C.INDEX_UNSET : periodIndex;
     }
 
     private long getAdjustedWindowDefaultStartPositionUs(long defaultPositionProjectionUs) {
@@ -1225,6 +1247,11 @@ public final class DashMediaSource extends BaseMediaSource {
           - defaultStartPositionInPeriodUs;
     }
 
+    @Override
+    public Object getUidOfPeriod(int periodIndex) {
+      Assertions.checkIndex(periodIndex, 0, getPeriodCount());
+      return firstPeriodId + periodIndex;
+    }
   }
 
   private final class DefaultPlayerEmsgCallback implements PlayerEmsgCallback {
@@ -1260,11 +1287,12 @@ public final class DashMediaSource extends BaseMediaSource {
     }
 
     @Override
-    public @Loader.RetryAction int onLoadError(
+    public LoadErrorAction onLoadError(
         ParsingLoadable<DashManifest> loadable,
         long elapsedRealtimeMs,
         long loadDurationMs,
-        IOException error) {
+        IOException error,
+        int errorCount) {
       return onManifestLoadError(loadable, elapsedRealtimeMs, loadDurationMs, error);
     }
 
@@ -1285,11 +1313,12 @@ public final class DashMediaSource extends BaseMediaSource {
     }
 
     @Override
-    public @Loader.RetryAction int onLoadError(
+    public LoadErrorAction onLoadError(
         ParsingLoadable<Long> loadable,
         long elapsedRealtimeMs,
         long loadDurationMs,
-        IOException error) {
+        IOException error,
+        int errorCount) {
       return onUtcTimestampLoadError(loadable, elapsedRealtimeMs, loadDurationMs, error);
     }
 

@@ -30,9 +30,7 @@ import com.google.android.exoplayer2.util.Util;
 
 import java.util.Arrays;
 
-/**
- * Represents the set of audio formats that a device is capable of playing.
- */
+/** Represents the set of audio formats that a device is capable of playing. */
 @TargetApi(21)
 public final class AudioCapabilities {
 
@@ -43,10 +41,12 @@ public final class AudioCapabilities {
       new AudioCapabilities(new int[] {AudioFormat.ENCODING_PCM_16BIT}, 2);
 
   // AMZN_CHANGE_BEGIN
-   /** For Optical output, we read this global setting to detect if dolby output is enabled by
-     * the user. If not, we fallback on the HDMI audio intent.
+   /** For Optical output, we read this global setting to detect if dolby
+     * output is enabled. If USE_EXTERNAL_SURROUND_SOUND_FLAG is not set, then
+     * we fallback on the HDMI audio intent.
      */
   public static final String EXTERNAL_SURROUND_SOUND_ENABLED = "external_surround_sound_enabled";
+ public static final String USE_EXTERNAL_SURROUND_SOUND_FLAG = "use_external_surround_sound_flag";
   public static final AudioCapabilities SURROUND_AUDIO_CAPABILITIES =
       new AudioCapabilities(new int[] {AudioFormat.ENCODING_PCM_16BIT,
           AudioFormat.ENCODING_AC3,
@@ -66,10 +66,22 @@ public final class AudioCapabilities {
   }
 
   @SuppressLint("InlinedApi")
-  /* package */ static AudioCapabilities getCapabilities(Context context, Intent intent) {
+  /* package */ static AudioCapabilities getCapabilities(Context context, @Nullable Intent intent) {
     // AMZN_CHANGE_BEGIN
-    if (Util.SDK_INT >= 17 && isSurroundSoundEnabledV17(context.getContentResolver())) {
-      return SURROUND_AUDIO_CAPABILITIES;
+    boolean useSurroundSoundFlag = false;
+    boolean isSurroundSoundEnabled = false;
+
+    // read global surround sound amazon specific settings
+    if (Util.SDK_INT >= 17) {
+        ContentResolver resolver = context.getContentResolver();
+        useSurroundSoundFlag = useSurroundSoundFlagV17(resolver);
+        isSurroundSoundEnabled = isSurroundSoundEnabledV17(resolver);
+    }
+
+    // use surround sound enabled flag if it is
+    if (useSurroundSoundFlag) {
+        return isSurroundSoundEnabled ? SURROUND_AUDIO_CAPABILITIES :
+                DEFAULT_AUDIO_CAPABILITIES;
     }
     // AMZN_CHANGE_END
     if (intent == null || intent.getIntExtra(AudioManager.EXTRA_AUDIO_PLUG_STATE, 0) == 0) {
@@ -84,6 +96,11 @@ public final class AudioCapabilities {
   public static boolean isSurroundSoundEnabledV17(ContentResolver resolver) {
     return Settings.Global.getInt(resolver, EXTERNAL_SURROUND_SOUND_ENABLED, 0) == 1;
   }
+  public static boolean useSurroundSoundFlagV17(ContentResolver
+        resolver) {
+    return Settings.Global.getInt(resolver, USE_EXTERNAL_SURROUND_SOUND_FLAG,
+            0) == 1;
+  }
   // AMZN_CHANGE_END
   private final int[] supportedEncodings;
   private final int maxChannelCount;
@@ -92,11 +109,15 @@ public final class AudioCapabilities {
    * Constructs new audio capabilities based on a set of supported encodings and a maximum channel
    * count.
    *
+   * <p>Applications should generally call {@link #getCapabilities(Context)} to obtain an instance
+   * based on the capabilities advertised by the platform, rather than calling this constructor.
+   *
    * @param supportedEncodings Supported audio encodings from {@link android.media.AudioFormat}'s
-   *     {@code ENCODING_*} constants.
+   *     {@code ENCODING_*} constants. Passing {@code null} indicates that no encodings are
+   *     supported.
    * @param maxChannelCount The maximum number of audio channels that can be played simultaneously.
    */
-  /* package */ AudioCapabilities(int[] supportedEncodings, int maxChannelCount) {
+  public AudioCapabilities(@Nullable int[] supportedEncodings, int maxChannelCount) {
     if (supportedEncodings != null) {
       this.supportedEncodings = Arrays.copyOf(supportedEncodings, supportedEncodings.length);
       Arrays.sort(this.supportedEncodings);
