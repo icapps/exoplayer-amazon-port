@@ -15,22 +15,16 @@
  */
 package com.google.android.exoplayer2.text.ttml;
 
+import android.annotation.SuppressLint;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.support.annotation.Nullable;
+import android.graphics.Color;
 import android.text.SpannableStringBuilder;
-import android.util.Base64;
-import android.util.Pair;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.text.Cue;
 import com.google.android.exoplayer2.util.Assertions;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+
+import java.util.*;
 import java.util.Map.Entry;
-import java.util.TreeMap;
-import java.util.TreeSet;
 
 /**
  * A package internal representation of TTML node.
@@ -49,9 +43,9 @@ import java.util.TreeSet;
   public static final String TAG_LAYOUT = "layout";
   public static final String TAG_REGION = "region";
   public static final String TAG_METADATA = "metadata";
-  public static final String TAG_IMAGE = "image";
-  public static final String TAG_DATA = "data";
-  public static final String TAG_INFORMATION = "information";
+  public static final String TAG_SMPTE_IMAGE = "smpte:image";
+  public static final String TAG_SMPTE_DATA = "smpte:data";
+  public static final String TAG_SMPTE_INFORMATION = "smpte:information";
 
   public static final String ANONYMOUS_REGION_ID = "";
   public static final String ATTR_ID = "id";
@@ -80,72 +74,51 @@ import java.util.TreeSet;
   public static final String START = "start";
   public static final String END = "end";
 
-  @Nullable public final String tag;
-  @Nullable public final String text;
+  public final String tag;
+  public final String text;
   public final boolean isTextNode;
   public final long startTimeUs;
   public final long endTimeUs;
-  @Nullable public final TtmlStyle style;
-  @Nullable private final String[] styleIds;
+  public final TtmlStyle style;
   public final String regionId;
-  @Nullable public final String imageId;
+  public final String backgroundImageId;
 
+  private final String[] styleIds;
   private final HashMap<String, Integer> nodeStartsByRegion;
   private final HashMap<String, Integer> nodeEndsByRegion;
 
   private List<TtmlNode> children;
 
   public static TtmlNode buildTextNode(String text) {
-    return new TtmlNode(
-            /* tag= */ null,
-            TtmlRenderUtil.applyTextElementSpacePolicy(text),
-            /* startTimeUs= */ C.TIME_UNSET,
-            /* endTimeUs= */ C.TIME_UNSET,
-            /* style= */ null,
-            /* styleIds= */ null,
-            ANONYMOUS_REGION_ID,
-            /* imageId= */ null);
+    return new TtmlNode(null, TtmlRenderUtil.applyTextElementSpacePolicy(text), C.TIME_UNSET,
+            C.TIME_UNSET, null, null, ANONYMOUS_REGION_ID, null);
   }
 
-  public static TtmlNode buildNode(
-          @Nullable String tag,
-          long startTimeUs,
-          long endTimeUs,
-          @Nullable TtmlStyle style,
-          @Nullable String[] styleIds,
-          String regionId,
-          @Nullable String imageId) {
-    return new TtmlNode(
-            tag, /* text= */ null, startTimeUs, endTimeUs, style, styleIds, regionId, imageId);
+  public static TtmlNode buildNode(String tag, long startTimeUs, long endTimeUs,
+                                   TtmlStyle style, String[] styleIds, String regionId, String backgroundImageId) {
+    return new TtmlNode(tag, null, startTimeUs, endTimeUs, style, styleIds, regionId, backgroundImageId);
   }
 
-  private TtmlNode(
-          @Nullable String tag,
-          @Nullable String text,
-          long startTimeUs,
-          long endTimeUs,
-          @Nullable TtmlStyle style,
-          @Nullable String[] styleIds,
-          String regionId,
-          @Nullable String imageId) {
+  private TtmlNode(String tag, String text, long startTimeUs, long endTimeUs,
+                   TtmlStyle style, String[] styleIds, String regionId, String backgroundImageId) {
     this.tag = tag;
     this.text = text;
-    this.imageId = imageId;
     this.style = style;
     this.styleIds = styleIds;
     this.isTextNode = text != null;
     this.startTimeUs = startTimeUs;
     this.endTimeUs = endTimeUs;
     this.regionId = Assertions.checkNotNull(regionId);
+    this.backgroundImageId = backgroundImageId;
     nodeStartsByRegion = new HashMap<>();
     nodeEndsByRegion = new HashMap<>();
   }
 
   public boolean isActive(long timeUs) {
     return (startTimeUs == C.TIME_UNSET && endTimeUs == C.TIME_UNSET)
-           || (startTimeUs <= timeUs && endTimeUs == C.TIME_UNSET)
-           || (startTimeUs == C.TIME_UNSET && timeUs < endTimeUs)
-           || (startTimeUs <= timeUs && timeUs < endTimeUs);
+        || (startTimeUs <= timeUs && endTimeUs == C.TIME_UNSET)
+        || (startTimeUs == C.TIME_UNSET && timeUs < endTimeUs)
+        || (startTimeUs <= timeUs && timeUs < endTimeUs);
   }
 
   public void addChild(TtmlNode child) {
@@ -179,8 +152,7 @@ import java.util.TreeSet;
 
   private void getEventTimes(TreeSet<Long> out, boolean descendsPNode) {
     boolean isPNode = TAG_P.equals(tag);
-    boolean isDivNode = TAG_DIV.equals(tag);
-    if (descendsPNode || isPNode || (isDivNode && imageId != null)) {
+    if (descendsPNode || isPNode) {
       if (startTimeUs != C.TIME_UNSET) {
         out.add(startTimeUs);
       }
@@ -200,83 +172,76 @@ import java.util.TreeSet;
     return styleIds;
   }
 
-  public List<Cue> getCues(
-          long timeUs,
-          Map<String, TtmlStyle> globalStyles,
-          Map<String, TtmlRegion> regionMap,
-          Map<String, String> imageMap) {
-
-    List<Pair<String, String>> regionImageOutputs = new ArrayList<>();
-    traverseForImage(timeUs, regionId, regionImageOutputs);
-
-    TreeMap<String, SpannableStringBuilder> regionTextOutputs = new TreeMap<>();
-    traverseForText(timeUs, false, regionId, regionTextOutputs);
-    traverseForStyle(timeUs, globalStyles, regionTextOutputs);
-
+  public List<Cue> getCues(long timeUs, Map<String, TtmlStyle> globalStyles,
+      Map<String, TtmlRegion> regionMap, TtmlMetadata metadata) {
+    TreeMap<String, SubtitleAccumulator> regionOutputs = new TreeMap<>();
+    traverseForText(timeUs, false, regionId, regionOutputs, metadata);
+    traverseForStyle(timeUs, globalStyles, regionOutputs);
     List<Cue> cues = new ArrayList<>();
-
-    // Create image based cues.
-    for (Pair<String, String> regionImagePair : regionImageOutputs) {
-      String encodedBitmapData = imageMap.get(regionImagePair.second);
-      if (encodedBitmapData == null) {
-        // Image reference points to an invalid image. Do nothing.
-        continue;
-      }
-
-      byte[] bitmapData = Base64.decode(encodedBitmapData, Base64.DEFAULT);
-      Bitmap bitmap = BitmapFactory.decodeByteArray(bitmapData, /* offset= */ 0, bitmapData.length);
-      TtmlRegion region = regionMap.get(regionImagePair.first);
-
-      cues.add(
-              new Cue(
-                      bitmap,
-                      region.position,
-                      Cue.ANCHOR_TYPE_MIDDLE,
-                      region.line,
-                      region.lineAnchor,
-                      region.width,
-                      /* height= */ Cue.DIMEN_UNSET));
-    }
-
-    // Create text based cues.
-    for (Entry<String, SpannableStringBuilder> entry : regionTextOutputs.entrySet()) {
+    for (Entry<String, SubtitleAccumulator> entry : regionOutputs.entrySet()) {
       TtmlRegion region = regionMap.get(entry.getKey());
+      final Bitmap backgroundImage = entry.getValue().backgroundImage;
       cues.add(
-              new Cue(
-                      cleanUpText(entry.getValue()),
-                      /* textAlignment= */ null,
-                      region.line,
-                      region.lineType,
-                      region.lineAnchor,
-                      region.position,
-                      /* positionAnchor= */ Cue.TYPE_UNSET,
-                      region.width,
-                      region.textSizeType,
-                      region.textSize));
+          new Cue(
+              cleanUpText(entry.getValue().builder),
+              /* textAlignment= */ null,
+              backgroundImage,
+              getLineYValue(region),                  //line
+              getLineType(region),                    //lineType
+              region.lineAnchor,                      //lineAnchor
+              getLineXValue(region.x),                //Position
+              /* positionAnchor= */ Cue.TYPE_UNSET,   //positionAnchor
+              region.textSizeType,                    //textSizeType
+              region.textSize,                        //textSize
+              getLineXValue(region.width),            //size
+             1.0f,
+              false,
+              Color.BLACK));
     }
-
     return cues;
   }
 
-  private void traverseForImage(
-          long timeUs, String inheritedRegion, List<Pair<String, String>> regionImageList) {
-    String resolvedRegionId = ANONYMOUS_REGION_ID.equals(regionId) ? inheritedRegion : regionId;
-    if (isActive(timeUs) && TAG_DIV.equals(tag) && imageId != null) {
-      regionImageList.add(new Pair<>(resolvedRegionId, imageId));
-      return;
+  @SuppressLint("SwitchIntDef")
+  private static float getLineYValue(final TtmlRegion region){
+    if (region.y == null)
+      return Cue.DIMEN_UNSET;
+    final float value;
+    if (region.y.type == TtmlLength.TYPE_PERCENTAGE)
+      value = region.y.value / 100.0f;
+    else
+      value = region.y.value;
+    switch (region.lineAnchor) {
+      case Cue.ANCHOR_TYPE_MIDDLE:
+        return value + region.height.value / 2.0f;
+      case Cue.ANCHOR_TYPE_END:
+        return value + region.height.value;
     }
-    for (int i = 0; i < getChildCount(); ++i) {
-      getChild(i).traverseForImage(timeUs, resolvedRegionId, regionImageList);
-    }
+    return value;
   }
 
-  private void traverseForText(
-          long timeUs,
-          boolean descendsPNode,
-          String inheritedRegion,
-          Map<String, SpannableStringBuilder> regionOutputs) {
+  private static float getLineXValue(final TtmlLength length){
+    if (length == null)
+      return Cue.DIMEN_UNSET;
+    if (length.type == TtmlLength.TYPE_PERCENTAGE)
+      return length.value / 100.0f;
+    return length.value;
+  }
+
+
+  private static int getLineType(final TtmlRegion region){
+    if (region.y == null)
+      return Cue.TYPE_UNSET;
+    return Cue.LINE_TYPE_FRACTION;
+  }
+
+  private void traverseForText(long timeUs,
+                               boolean descendsPNode,
+                               String inheritedRegion,
+                               Map<String, SubtitleAccumulator> regionOutputs,
+                               TtmlMetadata metadata) {
     nodeStartsByRegion.clear();
     nodeEndsByRegion.clear();
+
     if (TAG_METADATA.equals(tag)) {
       // Ignore metadata tag.
       return;
@@ -289,38 +254,41 @@ import java.util.TreeSet;
     } else if (TAG_BR.equals(tag) && descendsPNode) {
       getRegionOutput(resolvedRegionId, regionOutputs).append('\n');
     } else if (isActive(timeUs)) {
+      if (backgroundImageId != null)
+        getRegionOutput(resolvedRegionId, regionOutputs).backgroundImage = metadata.getImage(backgroundImageId);
+
       // This is a container node, which can contain zero or more children.
-      for (Entry<String, SpannableStringBuilder> entry : regionOutputs.entrySet()) {
+      for (Entry<String, SubtitleAccumulator> entry : regionOutputs.entrySet()) {
         nodeStartsByRegion.put(entry.getKey(), entry.getValue().length());
       }
 
       boolean isPNode = TAG_P.equals(tag);
       for (int i = 0; i < getChildCount(); i++) {
         getChild(i).traverseForText(timeUs, descendsPNode || isPNode, resolvedRegionId,
-                regionOutputs);
+                regionOutputs, metadata);
       }
       if (isPNode) {
-        TtmlRenderUtil.endParagraph(getRegionOutput(resolvedRegionId, regionOutputs));
+        TtmlRenderUtil.endParagraph(getRegionOutput(resolvedRegionId, regionOutputs).builder);
       }
 
-      for (Entry<String, SpannableStringBuilder> entry : regionOutputs.entrySet()) {
+      for (Entry<String, SubtitleAccumulator> entry : regionOutputs.entrySet()) {
         nodeEndsByRegion.put(entry.getKey(), entry.getValue().length());
       }
     }
   }
 
-  private static SpannableStringBuilder getRegionOutput(
-          String resolvedRegionId, Map<String, SpannableStringBuilder> regionOutputs) {
+  private static SubtitleAccumulator getRegionOutput(String resolvedRegionId,
+      Map<String, SubtitleAccumulator> regionOutputs) {
     if (!regionOutputs.containsKey(resolvedRegionId)) {
-      regionOutputs.put(resolvedRegionId, new SpannableStringBuilder());
+      regionOutputs.put(resolvedRegionId, new SubtitleAccumulator());
     }
     return regionOutputs.get(resolvedRegionId);
   }
 
   private void traverseForStyle(
-          long timeUs,
-          Map<String, TtmlStyle> globalStyles,
-          Map<String, SpannableStringBuilder> regionOutputs) {
+      long timeUs,
+      Map<String, TtmlStyle> globalStyles,
+      Map<String, SubtitleAccumulator> regionOutputs) {
     if (!isActive(timeUs)) {
       return;
     }
@@ -329,7 +297,7 @@ import java.util.TreeSet;
       int start = nodeStartsByRegion.containsKey(regionId) ? nodeStartsByRegion.get(regionId) : 0;
       int end = entry.getValue();
       if (start != end) {
-        SpannableStringBuilder regionOutput = regionOutputs.get(regionId);
+        SubtitleAccumulator regionOutput = regionOutputs.get(regionId);
         applyStyleToOutput(globalStyles, regionOutput, start, end);
       }
     }
@@ -339,13 +307,13 @@ import java.util.TreeSet;
   }
 
   private void applyStyleToOutput(
-          Map<String, TtmlStyle> globalStyles,
-          SpannableStringBuilder regionOutput,
-          int start,
-          int end) {
+      Map<String, TtmlStyle> globalStyles,
+      SubtitleAccumulator regionOutput,
+      int start,
+      int end) {
     TtmlStyle resolvedStyle = TtmlRenderUtil.resolveStyle(style, styleIds, globalStyles);
     if (resolvedStyle != null) {
-      TtmlRenderUtil.applyStylesToSpan(regionOutput, start, end, resolvedStyle);
+      TtmlRenderUtil.applyStylesToSpan(regionOutput.builder, start, end, resolvedStyle);
     }
   }
 
@@ -394,6 +362,23 @@ import java.util.TreeSet;
       /*builderLength--;*/
     }
     return builder;
+  }
+
+  private static class SubtitleAccumulator {
+    SpannableStringBuilder builder = new SpannableStringBuilder();
+    Bitmap backgroundImage = null;
+
+    public void append(CharSequence text) {
+      builder.append(text);
+    }
+
+    public void append(char c) {
+      builder.append(c);
+    }
+
+    public int length() {
+      return builder.length();
+    }
   }
 
 }
