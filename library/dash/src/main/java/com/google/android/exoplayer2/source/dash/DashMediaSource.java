@@ -81,6 +81,7 @@ public final class DashMediaSource extends BaseMediaSource {
     private LoadErrorHandlingPolicy loadErrorHandlingPolicy;
     private long livePresentationDelayMs;
     private boolean livePresentationDelayOverridesManifest;
+    private final @Nullable Long minUpdateOverride;
     private boolean isCreateCalled;
     private @Nullable Object tag;
 
@@ -91,7 +92,7 @@ public final class DashMediaSource extends BaseMediaSource {
      *     manifest and media data.
      */
     public Factory(DataSource.Factory dataSourceFactory) {
-      this(new DefaultDashChunkSource.Factory(dataSourceFactory), dataSourceFactory);
+      this(new DefaultDashChunkSource.Factory(dataSourceFactory), dataSourceFactory, null);
     }
 
     /**
@@ -102,12 +103,16 @@ public final class DashMediaSource extends BaseMediaSource {
      *     to load (and refresh) the manifest. May be {@code null} if the factory will only ever be
      *     used to create create media sources with sideloaded manifests via {@link
      *     #createMediaSource(DashManifest, Handler, MediaSourceEventListener)}.
+     * @param minUpdateOverride Optional override for the minUpdatePeriodMs from the dash manifest. If this is set,
+     *     the value from the manifest will not be used (when the manifest is dynamic)
      */
     public Factory(
         DashChunkSource.Factory chunkSourceFactory,
-        @Nullable DataSource.Factory manifestDataSourceFactory) {
+        @Nullable DataSource.Factory manifestDataSourceFactory,
+        @Nullable Long minUpdateOverride) {
       this.chunkSourceFactory = Assertions.checkNotNull(chunkSourceFactory);
       this.manifestDataSourceFactory = manifestDataSourceFactory;
+      this.minUpdateOverride = minUpdateOverride;
       loadErrorHandlingPolicy = new DefaultLoadErrorHandlingPolicy();
       livePresentationDelayMs = DEFAULT_LIVE_PRESENTATION_DELAY_MS;
       compositeSequenceableLoaderFactory = new DefaultCompositeSequenceableLoaderFactory();
@@ -249,7 +254,8 @@ public final class DashMediaSource extends BaseMediaSource {
           loadErrorHandlingPolicy,
           livePresentationDelayMs,
           livePresentationDelayOverridesManifest,
-          tag);
+          tag,
+          minUpdateOverride);
     }
 
     /**
@@ -290,7 +296,8 @@ public final class DashMediaSource extends BaseMediaSource {
           loadErrorHandlingPolicy,
           livePresentationDelayMs,
           livePresentationDelayOverridesManifest,
-          tag);
+          tag,
+          minUpdateOverride);
     }
 
     /**
@@ -357,6 +364,7 @@ public final class DashMediaSource extends BaseMediaSource {
   private final PlayerEmsgCallback playerEmsgCallback;
   private final LoaderErrorThrower manifestLoadErrorThrower;
   private final @Nullable Object tag;
+  private final @Nullable Long minUpdateOverride;
 
   private DataSource dataSource;
   private Loader loader;
@@ -429,7 +437,8 @@ public final class DashMediaSource extends BaseMediaSource {
         new DefaultLoadErrorHandlingPolicy(minLoadableRetryCount),
         DEFAULT_LIVE_PRESENTATION_DELAY_MS,
         /* livePresentationDelayOverridesManifest= */ false,
-        /* tag= */ null);
+        /* tag= */ null,
+        /* minUpdateOverride= */ null);
     if (eventHandler != null && eventListener != null) {
       addEventListener(eventHandler, eventListener);
     }
@@ -544,7 +553,8 @@ public final class DashMediaSource extends BaseMediaSource {
             ? DEFAULT_LIVE_PRESENTATION_DELAY_MS
             : livePresentationDelayMs,
         livePresentationDelayMs != DEFAULT_LIVE_PRESENTATION_DELAY_PREFER_MANIFEST_MS,
-        /* tag= */ null);
+        /* tag= */ null,
+        /* minUpdateOverride= */ null);
     if (eventHandler != null && eventListener != null) {
       addEventListener(eventHandler, eventListener);
     }
@@ -560,7 +570,8 @@ public final class DashMediaSource extends BaseMediaSource {
       LoadErrorHandlingPolicy loadErrorHandlingPolicy,
       long livePresentationDelayMs,
       boolean livePresentationDelayOverridesManifest,
-      @Nullable Object tag) {
+      @Nullable Object tag,
+      @Nullable Long minUpdateOverride) {
     this.initialManifestUri = manifestUri;
     this.manifest = manifest;
     this.manifestUri = manifestUri;
@@ -572,6 +583,7 @@ public final class DashMediaSource extends BaseMediaSource {
     this.livePresentationDelayOverridesManifest = livePresentationDelayOverridesManifest;
     this.compositeSequenceableLoaderFactory = compositeSequenceableLoaderFactory;
     this.tag = tag;
+    this.minUpdateOverride = minUpdateOverride;
     sideloadedManifest = manifest != null;
     manifestEventDispatcher = createEventDispatcher(/* mediaPeriodId= */ null);
     manifestUriLock = new Object();
@@ -716,9 +728,21 @@ public final class DashMediaSource extends BaseMediaSource {
     int periodCount = manifest == null ? 0 : manifest.getPeriodCount();
     int removedPeriodCount = 0;
     long newFirstPeriodStartTimeMs = newManifest.getPeriod(0).startMs;
-    while (removedPeriodCount < periodCount
-        && manifest.getPeriod(removedPeriodCount).startMs < newFirstPeriodStartTimeMs) {
-      removedPeriodCount++;
+    final String newPeriodId = newManifest.getPeriod(0).id;
+    if (newManifest.dynamic && newPeriodId != null) {
+      while (removedPeriodCount < periodCount) {
+        final String periodId = manifest.getPeriod(removedPeriodCount).id;
+        if ((periodId == null)||(!periodId.equals(newPeriodId))) {
+          removedPeriodCount++;
+        } else {
+          break;
+        }
+      }
+    } else {
+      while (removedPeriodCount < periodCount
+              && manifest.getPeriod(removedPeriodCount).startMs < newFirstPeriodStartTimeMs) {
+        removedPeriodCount++;
+      }
     }
 
     if (newManifest.dynamic) {
@@ -983,9 +1007,9 @@ public final class DashMediaSource extends BaseMediaSource {
         startLoadingManifest();
       } else if (scheduleRefresh
           && manifest.dynamic
-          && manifest.minUpdatePeriodMs != C.TIME_UNSET) {
+          && (manifest.minUpdatePeriodMs != C.TIME_UNSET || minUpdateOverride != null)) {
         // Schedule an explicit refresh if needed.
-        long minUpdatePeriodMs = manifest.minUpdatePeriodMs;
+        long minUpdatePeriodMs = (minUpdateOverride == null) ? manifest.minUpdatePeriodMs : minUpdateOverride;
         if (minUpdatePeriodMs == 0) {
           // TODO: This is a temporary hack to avoid constantly refreshing the MPD in cases where
           // minimumUpdatePeriod is set to 0. In such cases we shouldn't refresh unless there is

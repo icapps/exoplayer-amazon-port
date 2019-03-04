@@ -402,7 +402,7 @@ public class Cue {
         windowColor);
   }
 
-  private Cue(
+  public Cue(
       CharSequence text,
       Alignment textAlignment,
       Bitmap bitmap,

@@ -146,7 +146,7 @@ import java.lang.reflect.Method;
   private long resumeSystemTimeUs;
   private final Logger log = new Logger(Logger.Module.Audio, TAG);
   private final boolean DBG = log.allowDebug();
-  private final boolean VDBG = log.allowVerbose(); 
+  private final boolean VDBG = log.allowVerbose();
   // AMZN_CHANGE_END
 
   private @Nullable AudioTimestampPoller audioTimestampPoller;
@@ -298,7 +298,7 @@ import java.lang.reflect.Method;
       if (!sourceEnded) {
         positionUs -= latencyUs;
       }
-      if (VDBG) { 
+      if (VDBG) {
         log.v("getCurrentPositionUs : post-latency adjustment positionUs = "  + positionUs +
             " latencyUs = " + latencyUs);
       }
@@ -309,7 +309,7 @@ import java.lang.reflect.Method;
 
   /** Starts position tracking. Must be called immediately before {@link AudioTrack#play()}. */
   public void start() {
-    if (DBG) { 
+    if (DBG) {
       log.d("start");
     }
     Assertions.checkNotNull(audioTimestampPoller).reset();
@@ -417,7 +417,7 @@ import java.lang.reflect.Method;
     if (DBG) {
       log.d("pause");
     }
- 
+
     resetSyncParams();
     if (stopTimestampUs == C.TIME_UNSET) {
       // The audio track is going to be paused, so reset the timestamp poller to ensure it doesn't

@@ -18,15 +18,8 @@ if (project.ext.has("exoplayerPublishEnabled")
         artifactId = releaseArtifact
         desc = releaseDescription
         publishVersion = releaseVersion
-        repoName = getBintrayRepo()
-        userOrg = 'google'
-        groupId = 'com.google.android.exoplayer'
-        website = 'https://github.com/google/ExoPlayer'
+        userOrg = 'icapps'
+        groupId = 'com.icapps.android.exoplayer'
+        website = 'https://github.com/icapps/exoplayer-icapps-port'
     }
-}
-
-def getBintrayRepo() {
-    boolean publicRepo = hasProperty('publicRepo') &&
-        property('publicRepo').toBoolean()
-    return publicRepo ? 'exoplayer' : 'exoplayer-test'
 }
