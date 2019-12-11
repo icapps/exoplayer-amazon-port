@@ -15,7 +15,8 @@
  */
 package com.google.android.exoplayer2.text.ttml;
 
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.text.Cue;
 import com.google.android.exoplayer2.text.Subtitle;

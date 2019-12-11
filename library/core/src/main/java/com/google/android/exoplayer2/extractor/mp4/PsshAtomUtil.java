@@ -15,8 +15,8 @@
  */
 package com.google.android.exoplayer2.extractor.mp4;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import android.support.annotation.NonNull;
 import com.google.android.exoplayer2.util.Log;
 
 import com.google.android.exoplayer2.C;

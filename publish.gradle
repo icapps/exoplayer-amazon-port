@@ -23,18 +23,18 @@ if (project.ext.has("exoplayerPublishEnabled")
         website = 'https://github.com/icapps/exoplayer-icapps-port'
     }
 
-    gradle.taskGraph.whenReady { taskGraph ->
-        project.tasks
-                .findAll { task -> task.name.contains("generatePomFileFor") }
-                .forEach { task ->
-                    task.doLast {
-                        task.outputs.files
-                                .filter { File file ->
-                                    file.path.contains("publications") \
-                                        && file.name.matches("^pom-.+\\.xml\$")
-                                }
-                                .forEach { File file -> addLicense(file) }
-                    }
-                }
-    }
+//    gradle.taskGraph.whenReady { taskGraph ->
+//        project.tasks
+//                .findAll { task -> task.name.contains("generatePomFileFor") }
+//                .forEach { task ->
+//                    task.doLast {
+//                        task.outputs.files
+//                                .filter { File file ->
+//                                    file.path.contains("publications") \
+//                                        && file.name.matches("^pom-.+\\.xml\$")
+//                                }
+//                                .forEach { File file -> addLicense(file) }
+//                    }
+//                }
+//    }
 }

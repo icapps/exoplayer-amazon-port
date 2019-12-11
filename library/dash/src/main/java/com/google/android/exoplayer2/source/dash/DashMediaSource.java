@@ -753,7 +753,7 @@ public final class DashMediaSource extends BaseMediaSource {
     long newFirstPeriodStartTimeMs = newManifest.getPeriod(0).startMs;
     final String newPeriodId = newManifest.getPeriod(0).id;
     if (newManifest.dynamic && newPeriodId != null) {
-      while (removedPeriodCount < periodCount) {
+      while (removedPeriodCount < oldPeriodCount) {
         final String periodId = manifest.getPeriod(removedPeriodCount).id;
         if ((periodId == null)||(!periodId.equals(newPeriodId))) {
           removedPeriodCount++;
