@@ -42,6 +42,7 @@ import com.google.android.exoplayer2.util.Assertions;
 import com.google.android.exoplayer2.util.Log;
 import com.google.android.exoplayer2.util.MimeTypes;
 import com.google.android.exoplayer2.util.NalUnitUtil;
+import com.google.android.exoplayer2.util.PSSHQuirks;
 import com.google.android.exoplayer2.util.ParsableByteArray;
 import com.google.android.exoplayer2.util.TimestampAdjuster;
 import com.google.android.exoplayer2.util.Util;
@@ -1422,6 +1423,9 @@ public class FragmentedMp4Extractor implements Extractor {
         if (uuid == null) {
           Log.w(TAG, "Skipped pssh atom (failed to extract uuid)");
         } else {
+          if (uuid.equals(C.WIDEVINE_UUID) && PSSHQuirks.DOWNGRADE_WIDEVINE_PSSH_V1) {
+            psshData = PsshAtomUtil.downgradePsshVersion(psshData);
+          }
           schemeDatas.add(new SchemeData(uuid, MimeTypes.VIDEO_MP4, psshData));
         }
       }

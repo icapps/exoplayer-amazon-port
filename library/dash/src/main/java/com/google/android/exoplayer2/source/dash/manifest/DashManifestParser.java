@@ -35,6 +35,7 @@ import com.google.android.exoplayer2.upstream.ParsingLoadable;
 import com.google.android.exoplayer2.util.Assertions;
 import com.google.android.exoplayer2.util.Log;
 import com.google.android.exoplayer2.util.MimeTypes;
+import com.google.android.exoplayer2.util.PSSHQuirks;
 import com.google.android.exoplayer2.util.UriUtil;
 import com.google.android.exoplayer2.util.Util;
 import com.google.android.exoplayer2.util.XmlPullParserUtil;
@@ -451,6 +452,8 @@ public class DashManifestParser extends DefaultHandler
         if (uuid == null) {
           Log.w(TAG, "Skipping malformed cenc:pssh data");
           data = null;
+        } else if (uuid.equals(C.WIDEVINE_UUID) && PSSHQuirks.DOWNGRADE_WIDEVINE_PSSH_V1) {
+            data = PsshAtomUtil.downgradePsshVersion(data);
         }
       } else if (data == null
           && C.PLAYREADY_UUID.equals(uuid)
