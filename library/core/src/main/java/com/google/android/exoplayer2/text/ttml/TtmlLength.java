@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
 class TtmlLength {
 
   private static final String TAG = "TtmlDecoder";
-  private static final Pattern LENGTH_FORMAT = Pattern.compile("^(-?\\d+\\.?\\d*?)([^\\.\\s]+)$");
+  private static final Pattern LENGTH_FORMAT = Pattern.compile("^(-?\\d+\\.?\\d*?)([^\\.\\s\\d]+)$");
 
   static final int TYPE_PERCENTAGE = 0;
   static final int TYPE_PIXEL = 1;
