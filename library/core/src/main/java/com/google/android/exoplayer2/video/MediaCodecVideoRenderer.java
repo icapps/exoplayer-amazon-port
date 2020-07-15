@@ -59,6 +59,8 @@ import com.google.android.exoplayer2.video.VideoRendererEventListener.EventDispa
 import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.List;
+import com.google.android.exoplayer2.util.Logger;
+import com.google.android.exoplayer2.util.AmazonQuirks;
 
 /**
  * Decodes and renders video using {@link MediaCodec}.
@@ -166,6 +168,7 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
   private int pendingOutputStreamOffsetCount;
   @Nullable private VideoFrameMetadataListener frameMetadataListener;
 
+  private final Logger log = new Logger(Logger.Module.Video, TAG);
   /**
    * @param context A context.
    * @param mediaCodecSelector A decoder selector.
@@ -345,7 +348,13 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
     this.allowedJoiningTimeMs = allowedJoiningTimeMs;
     this.maxDroppedFramesToNotify = maxDroppedFramesToNotify;
     this.context = context.getApplicationContext();
-    frameReleaseTimeHelper = new VideoFrameReleaseTimeHelper(this.context);
+    // AMZN_CHANGE_BEGIN
+    if (AmazonQuirks.isSnappingToVsyncDisabled()) {
+      frameReleaseTimeHelper = new VideoFrameReleaseTimeHelper();
+    } else {
+      frameReleaseTimeHelper = new VideoFrameReleaseTimeHelper(this.context);
+    }
+    // AMZN_CHANGE_END
     eventDispatcher = new EventDispatcher(eventHandler, eventListener);
     deviceNeedsNoPostProcessWorkaround = deviceNeedsNoPostProcessWorkaround();
     pendingOutputStreamOffsetsUs = new long[MAX_PENDING_OUTPUT_STREAM_OFFSET_COUNT];
@@ -686,6 +695,16 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
       }
       surface = dummySurface;
     }
+
+    // AMZN_CHANGE_BEGIN
+    log.setTAG(codecName + "-" + TAG);
+    log.i("configureCodec: codecName = " + codec +
+            ", deviceNeedsNoPostProcessWorkaround = " + deviceNeedsNoPostProcessWorkaround +
+            ", format = " + format +
+            ", surface = " + surface +
+            ", crypto = " + crypto );
+    // AMZN_CHANGE_END
+
     codec.configure(mediaFormat, surface, crypto, 0);
     if (Util.SDK_INT >= 23 && tunneling) {
       tunnelingOnFrameRenderedListener = new OnFrameRenderedListenerV23(codec);
@@ -755,6 +774,7 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
   protected void onInputFormatChanged(FormatHolder formatHolder) throws ExoPlaybackException {
     super.onInputFormatChanged(formatHolder);
     Format newFormat = formatHolder.format;
+    log.i("onInputFormatChanged: format = " + newFormat); // AMZN_CHANGE_ONELINE
     eventDispatcher.inputFormatChanged(newFormat);
     pendingPixelWidthHeightRatio = newFormat.pixelWidthHeightRatio;
     pendingRotationDegrees = newFormat.rotationDegrees;
@@ -784,6 +804,8 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
   @Override
   protected void onOutputFormatChanged(MediaCodec codec, MediaFormat outputMediaFormat) {
     currentMediaFormat = outputMediaFormat;
+    log.i("onOutputFormatChanged: outputFormat:" + outputMediaFormat
+            + ", codec:" + codec); // AMZN_CHANGE_ONELINE
     boolean hasCrop =
         outputMediaFormat.containsKey(KEY_CROP_RIGHT)
             && outputMediaFormat.containsKey(KEY_CROP_LEFT)
@@ -853,7 +875,16 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
     }
 
     long presentationTimeUs = bufferPresentationTimeUs - outputStreamOffsetUs;
-
+    // // AMZN_CHANGE_BEGIN
+    if (log.allowDebug()) {
+      log.d("processOutputBuffer: positionUs = " + positionUs +
+          ", elapsedRealtimeUs = " + elapsedRealtimeUs +
+          ", bufferIndex = " + bufferIndex +
+          ", isDecodeOnlyBuffer = " + isDecodeOnlyBuffer +
+          ", isLastBuffer = " + isLastBuffer +
+          ", presentationTimeUs = " + bufferPresentationTimeUs);
+    }
+    // AMZN_CHANGE_END
     if (isDecodeOnlyBuffer && !isLastBuffer) {
       skipOutputBuffer(codec, bufferIndex, presentationTimeUs);
       return true;
@@ -1092,6 +1123,7 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
    * @param presentationTimeUs The presentation time of the output buffer, in microseconds.
    */
   protected void skipOutputBuffer(MediaCodec codec, int index, long presentationTimeUs) {
+    log.i("skipOutputBuffer: bufferIndex = " + index + ", PTS = " + presentationTimeUs); // // AMZN_CHANGE_ONELINE
     TraceUtil.beginSection("skipVideoBuffer");
     codec.releaseOutputBuffer(index, false);
     TraceUtil.endSection();
@@ -1106,6 +1138,7 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
    * @param presentationTimeUs The presentation time of the output buffer, in microseconds.
    */
   protected void dropOutputBuffer(MediaCodec codec, int index, long presentationTimeUs) {
+    log.i("dropOutputBuffer: bufferIndex = " + index + ", PTS = " + presentationTimeUs); // // AMZN_CHANGE_ONELINE
     TraceUtil.beginSection("dropVideoBuffer");
     codec.releaseOutputBuffer(index, false);
     TraceUtil.endSection();
@@ -1176,6 +1209,11 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
    * @param presentationTimeUs The presentation time of the output buffer, in microseconds.
    */
   protected void renderOutputBuffer(MediaCodec codec, int index, long presentationTimeUs) {
+    // AMZN_CHANGE_BEGIN
+    if (log.allowDebug()) {
+      log.d("renderOutputBuffer: " + index + ", PTS = " + presentationTimeUs);
+    }
+    // // AMZN_CHANGE_END
     maybeNotifyVideoSizeChanged();
     TraceUtil.beginSection("releaseOutputBuffer");
     codec.releaseOutputBuffer(index, true);
@@ -1198,6 +1236,12 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
   @TargetApi(21)
   protected void renderOutputBufferV21(
       MediaCodec codec, int index, long presentationTimeUs, long releaseTimeNs) {
+    // AMZN_CHANGE_BEGIN
+    if (log.allowDebug()) {
+      log.d("renderOutputBufferV21: bufferIndex = " + index + ", PTS = " + presentationTimeUs +
+              ", releaseTimeNs = " + releaseTimeNs);
+    }
+    // AMZN_CHANGE_END
     maybeNotifyVideoSizeChanged();
     TraceUtil.beginSection("releaseOutputBuffer");
     codec.releaseOutputBuffer(index, releaseTimeNs);
@@ -1626,7 +1670,20 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
           // https://github.com/google/ExoPlayer/issues/4468#issuecomment-459291645.
           deviceNeedsSetOutputSurfaceWorkaround = true;
         } else if (Util.SDK_INT >= 27) {
-          // In general, devices running API level 27 or later should be unaffected. Do nothing.
+          // AMZN_CHANGE_BEGIN
+          switch (Util.MODEL){
+            case "AFTR":
+            case "AFTSO001":
+            case "AFTEU014":
+            case "AFTEUFF014":
+            case "AFTEU011":
+              deviceNeedsSetOutputSurfaceWorkaround = true;
+              break;
+            default:
+              // Do nothing.
+              break;
+          }
+          // AMZN_CHANGE_END
         } else {
           // Enable the workaround on a per-device basis. Works around:
           // https://github.com/google/ExoPlayer/issues/3236,
@@ -1781,6 +1838,10 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer {
             case "AFTA":
             case "AFTN":
             case "JSN-L21":
+            // AMZN_CHANGE_BEGIN
+            case "AFTJMST12":
+            case "AFTKMST12":
+            // AMZN_CHANGE_END
               deviceNeedsSetOutputSurfaceWorkaround = true;
               break;
             default:
